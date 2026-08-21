@@ -1,108 +1,110 @@
-const hat = "^";
-const hole = "O";
-const fieldCharacter = "░";
-const pathCharacter = "*";
+const term = require('terminal-kit').terminal;
+const { Field } = require('./field');
 
-class Field {
-  constructor(field = Field.generateField()) {
-    this.field = field; // 2D array of characters
-    this.height = field.length;
-    this.width = field[0].length;
-    this.player = this._findPlayer(); // {x, y} of the '*'
-  }
+async function playGame() {
+  const HEIGHT = 10;
+  const WIDTH = 10;
+  const HOLE_PCT = 0.2; // 20% of cells become holes
 
-  static generateField(height = 10, width = 10, holePercentage = 0.2) {
-    // 1. grid
-    const grid = Array.from({ length: height }, () =>
-      Array(width).fill(fieldCharacter),
-    );
+  // Test hook: inject a known map if provided (no-TTY automation).
+  const testMap = process.env.FH_TEST_MAP
+    ? JSON.parse(process.env.FH_TEST_MAP)
+    : Field.generateField(HEIGHT, WIDTH, HOLE_PCT);
+  const field = new Field(testMap);
 
-    // 2.
+  // --- Colored rendering of the field ---
+  // NOTE: term.<color>() returns the terminal object (chainable), NOT a
+  // string — so we call them as statements and never concat them into a
+  // string (that would print "[object Function]"). We print each char
+  // directly, then a newline per row.
+  function render() {
+    term.clear();
+    term.bold.cyan('╔══════════════════════════════════════╗\n');
+    term.bold.cyan('║            FIND YOUR HAT  🎩         ║\n');
+    term.bold.cyan('╚══════════════════════════════════════╝\n');
+    term('  ');
+    term.gray('*=you  ');
+    term.yellow('^=hat  ');
+    term.red('O=hole\n\n');
 
-    const cells = [];
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) cells.push({ x, y });
-    }
-    for (let i = cells.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [cells[i], cells[j]] = [cells[j], cells[i]];
-    }
-
-    // 3.
-    let idx = 0;
-    const numHoles = Math.floor(height * width * holePercentage);
-    for (let i = 0; i < numHoles; i++) {
-      const c = cells[idx++];
-      grid[c.y][c.x] = hole;
-    }
-    const hatCell = cells[idx++];
-    grid[hatCell.y][hatCell.x] = hat;
-
-    const actorCell = cells[idx++];
-    grid[actorCell.y][actorCell.x] = pathCharacter; // player starts here
-
-    return grid;
-  }
-
-  print() {
-    console.log("\n" + this.field.map((row) => row.join("")).join("\n") + "\n");
-  }
-
-  moveRight() {
-    return this._move(1, 0);
-  }
-  moveLeft() {
-    return this._move(-1, 0);
-  }
-  moveUp() {
-    return this._move(0, -1);
-  }
-  moveDown() {
-    return this._move(0, 1);
-  }
-
-  _isInBounds(x, y) {
-    return x >= 0 && x < this.width && y >= 0 && y < this.height;
-  }
-
-  _findPlayer() {
-    for (let y = 0; y < this.height; y++) {
-      for (let x = 0; x < this.width; x++) {
-        if (this.field[y][x] === pathCharacter) return { x, y };
+    for (const row of field.field) {
+      term('  ');
+      for (const ch of row) {
+        if (ch === '*') term.cyan('*');
+        else if (ch === '^') term.yellow('^');
+        else if (ch === 'O') term.red('O');
+        else term.gray('░');
       }
+      term('\n');
     }
-    return { x: 0, y: 0 }; // safe default
+    term('\n');
   }
 
-  _move(dx, dy) {
-    const newX = this.player.x + dx;
-    const newY = this.player.y + dy;
-
-    //oob
-    if (!this._isInBounds(newX, newY)) {
-      return { status: "out_of_bounds" };
-    }
-
-    const target = this.field[newY][newX];
-
-    // trail '*'
-    this.field[this.player.y][this.player.x] = pathCharacter;
-    this.player = { x: newX, y: newY };
-
-    // lose
-    if (target === hole) {
-      return { status: "hole" };
-    }
-
-    //win
-    if (target === hat) {
-      return { status: "hat" };
-    }
-
-    // new position as the player ---
-    this.field[newY][newX] = pathCharacter;
-    return { status: "ok" };
+  function bannerWin() {
+    term.green.bold('🎉 You found the hat! You win!\n');
   }
+  function bannerHole() {
+    term.red.bold('💀 You fell into a hole! Game over.\n');
+  }
+  function bannerOob() {
+    term.magenta.bold('🚫 You went out of bounds! Game over.\n');
+  }
+  function bannerQuit() {
+    term.cyan('👋 Thanks for playing!\n');
+  }
+
+  if (!process.stdin.isTTY) {
+    const moves = (process.env.FH_MOVES || '').split('');
+    render();
+    for (const m of moves) {
+      let r;
+      if (m === 'r') r = field.moveRight();
+      else if (m === 'l') r = field.moveLeft();
+      else if (m === 'u') r = field.moveUp();
+      else if (m === 'd') r = field.moveDown();
+      else continue;
+      if (r.status === 'hat') { render(); bannerWin(); term.processExit(); return; }
+      if (r.status === 'hole') { render(); bannerHole(); term.processExit(); return; }
+      if (r.status === 'out_of_bounds') { bannerOob(); term.processExit(); return; }
+    }
+    render();
+    bannerQuit();
+    term.processExit();
+    return;
+  }
+
+  render();
+
+  async function ask() {
+    term.bold('Move (u/d/l/r, q to quit): ');
+    const input = await term.inputField({ cancelable: true }).promise;
+    return (input || '').trim().toLowerCase();
+  }
+
+  while (true) {
+    const input = await ask();
+
+    if (input === 'q') { bannerQuit(); break; }
+    if (input === '') { continue; }
+
+    let result;
+    if (input === 'r') result = field.moveRight();
+    else if (input === 'l') result = field.moveLeft();
+    else if (input === 'u') result = field.moveUp();
+    else if (input === 'd') result = field.moveDown();
+    else {
+      term.yellow("❓ Use u / d / l / r (or q to quit).\n");
+      continue;
+    }
+
+    render();
+
+    if (result.status === 'hat') { bannerWin(); break; }
+    if (result.status === 'hole') { bannerHole(); break; }
+    if (result.status === 'out_of_bounds') { bannerOob(); break; }
+  }
+
+  term.processExit();
 }
 
-module.exports = { Field, hat, hole, fieldCharacter, pathCharacter };
+playGame();
