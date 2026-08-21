@@ -1,11 +1,11 @@
 {
-  "name": "find-your-hat",
-  "version": "1.0.0",
+  "name": "jsd13-find-your-hat",
+  "version": "1.0.1",
   "description": "A terminal maze-solving game.",
   "main": "main.js",
-  "author": "Codecademy",
+  "author": "Rattanachai",
   "license": "ISC",
   "dependencies": {
-    "prompt-sync": "^4.1.7"
+    "terminal-kit": "^3.1.4"
   }
 }
